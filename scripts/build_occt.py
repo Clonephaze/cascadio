@@ -23,7 +23,73 @@ import platform
 import subprocess
 import sys
 
-# Check if running inside cibuildwheel
+
+def activate_vs_environment():
+    """On Windows, locate vcvars64.bat and merge the VS developer environment
+    into the current process so that rc.exe, mt.exe, and link.exe are on PATH.
+
+    Does nothing on non-Windows platforms.
+    Returns True if the environment was successfully activated (or not needed).
+    """
+    if platform.system() != "Windows":
+        return True
+
+    # Check if already activated (vcvars sets this)
+    if os.environ.get("VSCMD_ARG_TGT_ARCH"):
+        print("VS developer environment already active.")
+        return True
+
+    # Search for vcvars64.bat in the known VS 2022/2019/2017 install locations
+    vs_roots = [
+        r"C:\Program Files\Microsoft Visual Studio",
+        r"C:\Program Files (x86)\Microsoft Visual Studio",
+    ]
+    editions = ["Enterprise", "Professional", "Community", "BuildTools"]
+    years = ["2022", "2019", "2017"]
+
+    vcvars = None
+    for root in vs_roots:
+        for year in years:
+            for edition in editions:
+                candidate = os.path.join(
+                    root, year, edition, "VC", "Auxiliary", "Build", "vcvars64.bat"
+                )
+                if os.path.isfile(candidate):
+                    vcvars = candidate
+                    break
+            if vcvars:
+                break
+        if vcvars:
+            break
+
+    if not vcvars:
+        print(
+            "Warning: Could not find vcvars64.bat. "
+            "Build may fail if rc.exe / mt.exe are not on PATH.",
+            file=sys.stderr,
+        )
+        return False
+
+    print(f"Activating VS environment from: {vcvars}")
+
+    # Run vcvars64.bat and capture the resulting environment via `set`
+    result = subprocess.run(
+        f'"{vcvars}" >nul 2>&1 && set',
+        shell=True,
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        print(f"Warning: vcvars64.bat failed: {result.stderr}", file=sys.stderr)
+        return False
+
+    # Parse `set` output and update os.environ
+    for line in result.stdout.splitlines():
+        if "=" in line:
+            key, _, value = line.partition("=")
+            os.environ[key] = value
+
+    return True
 IN_CIBUILDWHEEL = os.environ.get("CIBUILDWHEEL") == "1"
 
 # Get project root (parent of scripts/)
@@ -180,6 +246,10 @@ def main():
     args = parser.parse_args()
 
     system = platform.system()
+
+    # On Windows, activate the VS developer environment so that rc.exe,
+    # mt.exe, and link.exe are available to CMake/Ninja.
+    activate_vs_environment()
 
     # OCCT source is always in upstream/OCCT relative to project root
     occt_src = os.path.join(PROJECT_ROOT, "upstream", "OCCT")
