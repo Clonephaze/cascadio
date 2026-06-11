@@ -1,12 +1,15 @@
 """
-Dataclasses for BREP analytical surface primitives.
+Dataclasses for BREP analytical surface primitives and material information.
 
-These represent the analytical surfaces extracted from STEP files
+BREP primitives represent the analytical surfaces extracted from STEP files
 when using `include_brep=True` in `step_to_glb()`.
+
+Material dataclasses represent the physical and visual material properties
+extracted when using `include_materials=True` in `step_to_glb()`.
 """
 
 from dataclasses import dataclass
-from typing import List, Tuple, Union, Optional
+from typing import Dict, List, Optional, Tuple, Union
 
 
 @dataclass(frozen=True)
@@ -104,6 +107,72 @@ class Torus:
 # Union type for any primitive
 BrepPrimitive = Union[Plane, Cylinder, Cone, Sphere, Torus]
 
+
+# ============================================================================
+# Material Dataclasses
+# ============================================================================
+
+
+@dataclass(frozen=True)
+class PbrProperties:
+    """PBR (physically-based rendering) material properties."""
+
+    # Base color as RGBA, values 0-1
+    base_color: Tuple[float, float, float, float]
+    # Metallic factor 0-1
+    metallic: float
+    # Roughness factor 0-1
+    roughness: float
+    # Index of refraction
+    refraction_index: float
+    # Emissive factor as RGB
+    emissive_factor: Tuple[float, float, float]
+
+
+@dataclass(frozen=True)
+class CommonProperties:
+    """Legacy (Phong) material properties."""
+
+    ambient_color: Tuple[float, float, float]
+    diffuse_color: Tuple[float, float, float]
+    specular_color: Tuple[float, float, float]
+    emissive_color: Tuple[float, float, float]
+    # Specular exponent
+    shininess: float
+    # 0 = fully opaque, 1 = fully transparent
+    transparency: float
+
+
+@dataclass(frozen=True)
+class PhysicalMaterial:
+    """Physical material properties (name, density) from STEP AP214 material data."""
+
+    name: Optional[str]
+    description: Optional[str]
+    # Density as stored in the STEP file (typically g/mm³)
+    density: Optional[float]
+    density_name: Optional[str]
+    density_value_type: Optional[str]
+
+
+@dataclass(frozen=True)
+class VisualMaterial:
+    """Visual material properties (colors, PBR) from STEP visual material data."""
+
+    name: Optional[str]
+    # Base color as RGBA, values 0-1
+    base_color: Tuple[float, float, float, float]
+    # Alpha cutoff threshold
+    alpha_cutoff: float
+    # PBR properties, if present
+    pbr: Optional[PbrProperties]
+    # Legacy Phong properties, if present
+    common: Optional[CommonProperties]
+
+
+# Union type for any material
+Material = Union[PhysicalMaterial, VisualMaterial]
+
 __all__ = [
     "Plane",
     "Cylinder",
@@ -111,8 +180,15 @@ __all__ = [
     "Sphere",
     "Torus",
     "BrepPrimitive",
+    "PbrProperties",
+    "CommonProperties",
+    "PhysicalMaterial",
+    "VisualMaterial",
+    "Material",
     "parse_primitive",
     "parse_brep_faces",
+    "parse_material",
+    "parse_materials",
 ]
 
 
@@ -210,3 +286,89 @@ def parse_brep_faces(brep_faces: List[dict]) -> List[Optional[BrepPrimitive]]:
         Maintains the same indexing as the input list.
     """
     return [parse_primitive(face, face_index=i) for i, face in enumerate(brep_faces)]
+
+
+def parse_material(data: Optional[Dict]) -> Optional[Material]:
+    """
+    Parse a single material dict from GLB metadata into a typed dataclass.
+
+    Discriminates between PhysicalMaterial (has ``density`` key) and
+    VisualMaterial (has ``base_color`` key).  Returns ``None`` for
+    unrecognised or empty entries so callers can use the same index-safe
+    pattern as :func:`parse_brep_faces`.
+
+    Parameters
+    ----------
+    data : dict or None
+        A single entry from ``mesh.metadata["cascadio"]["materials"]``.
+
+    Returns
+    -------
+    PhysicalMaterial, VisualMaterial, or None
+    """
+    if not data:
+        return None
+
+    # Physical material: has density or is clearly a physical entry
+    if "density" in data or ("name" in data and "base_color" not in data):
+        return PhysicalMaterial(
+            name=data.get("name"),
+            description=data.get("description"),
+            density=data.get("density"),
+            density_name=data.get("density_name"),
+            density_value_type=data.get("density_value_type"),
+        )
+
+    # Visual material: has base_color
+    if "base_color" in data:
+        pbr = None
+        if "pbr" in data:
+            p = data["pbr"]
+            pbr = PbrProperties(
+                base_color=tuple(p["base_color"]),
+                metallic=p["metallic"],
+                roughness=p["roughness"],
+                refraction_index=p["refraction_index"],
+                emissive_factor=tuple(p["emissive_factor"]),
+            )
+
+        common = None
+        if "common" in data:
+            c = data["common"]
+            common = CommonProperties(
+                ambient_color=tuple(c["ambient_color"]),
+                diffuse_color=tuple(c["diffuse_color"]),
+                specular_color=tuple(c["specular_color"]),
+                emissive_color=tuple(c["emissive_color"]),
+                shininess=c["shininess"],
+                transparency=c["transparency"],
+            )
+
+        return VisualMaterial(
+            name=data.get("name"),
+            base_color=tuple(data["base_color"]),
+            alpha_cutoff=data.get("alpha_cutoff", 0.5),
+            pbr=pbr,
+            common=common,
+        )
+
+    return None
+
+
+def parse_materials(materials: List[Optional[Dict]]) -> List[Optional[Material]]:
+    """
+    Parse all material dicts from GLB metadata into typed dataclasses.
+
+    Parameters
+    ----------
+    materials : list of dict
+        The ``materials`` list from ``mesh.metadata["cascadio"]``.
+
+    Returns
+    -------
+    list of Material or None
+        Parsed materials in the same order as the input list.
+        Entries that cannot be parsed are ``None``.
+    """
+    return [parse_material(m) for m in materials]
+
