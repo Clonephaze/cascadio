@@ -18,6 +18,7 @@ from cascadio._core import (
 
 # Import primitives submodule
 from . import primitives
+from .primitives import parse_materials
 
 # Import trimesh extension
 from . import extension
@@ -129,5 +130,6 @@ __all__ = [
     "step_to_obj",
     "__version__",
     "primitives",
-    "trimesh_ext",
+    "extension",
+    "parse_materials",
 ]

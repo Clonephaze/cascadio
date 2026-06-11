@@ -523,6 +523,17 @@ def test_convert_step_to_glb_with_materials():
     assert "density" in mat
     assert 0.007 < mat["density"] < 0.008  # ~0.00785 g/mm³ for steel
 
+    # Parse into typed dataclasses
+    parsed = cascadio.parse_materials(materials)
+    assert len(parsed) == 1
+
+    m = parsed[0]
+    assert isinstance(m, cascadio.primitives.PhysicalMaterial)
+    assert m.name == "Steel"
+    assert m.description == "Steel"
+    assert m.density is not None
+    assert 0.007 < m.density < 0.008
+
     # Test with both materials and BREP data (plane filter)
     glb_data_with_brep = cascadio.load(
         step_data,
@@ -560,6 +571,13 @@ def test_convert_step_to_glb_with_materials():
     ]
     assert len(planes) > 0
     assert len(non_planes) == 0  # Only planes should be present
+
+    # Typed parse should also work in the combined case
+    parsed_brep = cascadio.parse_materials(
+        mesh_brep.metadata["cascadio"]["materials"]
+    )
+    assert isinstance(parsed_brep[0], cascadio.primitives.PhysicalMaterial)
+    assert parsed_brep[0].name == "Steel"
 
 
 @pytest.fixture
