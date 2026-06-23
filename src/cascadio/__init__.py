@@ -43,7 +43,7 @@ def load(
     include_brep: bool = False,
     brep_types: Optional[Set[BrepType]] = None,
     include_materials: bool = False,
-    node_name_format: NodeNameFormat = NodeNameFormat.PRODUCT_OR_INSTANCE,
+    node_name_format: NodeNameFormat = NodeNameFormat.INSTANCE_OR_PRODUCT,
 ) -> bytes:
     """
     Convert BREP data (STEP or IGES) to GLB format.
